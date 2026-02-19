@@ -1,9 +1,12 @@
+from pathlib import Path
+import os
 import time
 import requests
 import socket
 import platform
 import json
 import docker
+import sys
 from dataclasses import dataclass
 
 client = docker.from_env()
@@ -25,27 +28,30 @@ def agent_with_host_to_json(agent_with_host: AgentWithHost):
     agent_with_host_dict["host"] = agent_with_host.host.__dict__
     return json.dumps(agent_with_host_dict)
 
-
 def main():
-    uuid = register_agent()
+    hub_address = ""
+    if len(sys.argv) != 2: 
+        print("Provided ip or domain",file=sys.stderr)
+        sys.exit(1)
+    hub_address = sys.argv.pop()
+    uuid = register_agent(hub_address)
     while True:
-        update(uuid)
+        update(hub_address, uuid)
 
-def update(uuid: str):
-    update_heartbeat(uuid)
+def update(hub_address: str ,uuid: str):
+    update_heartbeat(hub_address, uuid)
     time.sleep(60) 
-    pass
 
-def update_heartbeat(uuid: str):
-    pydockmate_url = "http://localhost:8000"
+def update_heartbeat(hub_address: str, uuid: str):
+    pydockmate_url = f"{hub_address}:8000"
     if not pydockmate_url.startswith("http"):
         pydockmate_url = f"http://{pydockmate_url}"
     heartbeat_url = f"{pydockmate_url}/api/agent/{uuid}/heartbeat/"
     response = requests.put(heartbeat_url)
     print(response.text)
 
-def register_agent():
-    pydockmate_url = "http://localhost:8000"
+def register_agent(hub_address: str) -> str:
+    pydockmate_url = f"{hub_address}:8000"
     if not pydockmate_url.startswith("http"):
         pydockmate_url = f"http://{pydockmate_url}"
     register_url = f"{pydockmate_url}/api/agent/register"
@@ -64,7 +70,7 @@ def register_agent():
     }
 
     response = requests.post(register_url, data=agent_with_host_json, headers=headers)
-    uuid = response.json()["uuid"]
+    uuid: str = response.json()["uuid"]
     print(uuid)
     return uuid 
 

@@ -28,13 +28,49 @@ def agent_with_host_to_json(agent_with_host: AgentWithHost):
     agent_with_host_dict["host"] = agent_with_host.host.__dict__
     return json.dumps(agent_with_host_dict)
 
+def config_dir() -> Path:
+    xdg = os.getenv("XDG_CONFIG_HOME")
+    if xdg:
+        base = Path(xdg)
+    else:
+        home = os.getenv("HOME")
+        if not home:
+            raise RuntimeError("HOME not set")
+        base = Path(home) / ".config"
+
+    return base / "PyDockMateAgent"
+
+def load_agent_id_from_config() -> str | None:
+    try:
+        cfg_dir = config_dir()
+        cfg_file = cfg_dir / "config"
+        if cfg_file.is_file():
+            return cfg_file.read_text()
+        else:
+            return None
+    except Exception:
+        return None
+
+def save_agent_id_to_config(url: str) -> None:
+    try:
+        cfg_dir = config_dir()
+        cfg_dir.mkdir(parents=True, exist_ok=True)
+        cfg_file = cfg_dir / "config"
+        cfg_file.write_text(url)
+    except Exception as e:
+        raise RuntimeError(f"Failed to write config: {e}") from e
+
 def main():
     hub_address = ""
     if len(sys.argv) != 2: 
         print("Provided ip or domain",file=sys.stderr)
         sys.exit(1)
     hub_address = sys.argv.pop()
-    uuid = register_agent(hub_address)
+    # TODO: validate
+    uuid = load_agent_id_from_config()
+    if uuid == None:
+        uuid = register_agent(hub_address)
+        save_agent_id_to_config(uuid)
     while True:
         update(hub_address, uuid)
 

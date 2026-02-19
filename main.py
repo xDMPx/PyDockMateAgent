@@ -67,12 +67,14 @@ def main():
         sys.exit(1)
     hub_address = sys.argv.pop()
     # TODO: validate
-    uuid = load_agent_id_from_config()
-    if uuid == None:
-        uuid = register_agent(hub_address)
-        save_agent_id_to_config(uuid)
+    agent_uuid = load_agent_id_from_config()
+    if agent_uuid == None:
+        agent_uuid = register_agent(hub_address)
+        save_agent_id_to_config(agent_uuid)
+    host_uuid = get_host_uuid(hub_address, agent_uuid)
+    print(host_uuid)
     while True:
-        update(hub_address, uuid)
+        update(hub_address, agent_uuid)
 
 def update(hub_address: str ,uuid: str):
     update_heartbeat(hub_address, uuid)
@@ -109,6 +111,16 @@ def register_agent(hub_address: str) -> str:
     uuid: str = response.json()["uuid"]
     print(uuid)
     return uuid 
+
+def get_host_uuid(hub_address: str, agent_uuid: str) -> str:
+    pydockmate_url = f"{hub_address}:8000"
+    if not pydockmate_url.startswith("http"):
+        pydockmate_url = f"http://{pydockmate_url}"
+    agent_host_id_url = f"{pydockmate_url}/api/agent/{agent_uuid}/host"
+    
+    response = requests.get(agent_host_id_url)
+    host_uuid = response.json()["host_uuid"]
+    return host_uuid
 
 if __name__ == "__main__":
     main()

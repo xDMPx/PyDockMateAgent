@@ -1,6 +1,7 @@
 from pathlib import Path
 import os
 import time
+from docker.models import containers
 import requests
 import socket
 import platform
@@ -89,8 +90,7 @@ def main():
 
 def update(hub_address: str, agent_uuid: str, host_uuid: str):
     update_heartbeat(hub_address, agent_uuid)
-    print("---")
-    print("====")
+    update_containers(hub_address, host_uuid)
     time.sleep(60) 
 
 def update_heartbeat(hub_address: str, uuid: str):
@@ -106,9 +106,18 @@ def register_docker_containers(hub_address: str, host_uuid: str):
     for container in containers:
         register_container(hub_address, host_uuid, container)
     
+def update_containers(hub_address, host_uuid):
+    registered_containers = get_host_containers(hub_address, host_uuid)
+    system_containers = get_containers_from_docker_client()
+    diff_ids = set(c.id for c in system_containers)-set(c.id for c in registered_containers)
+    diff = list(filter(lambda c: c.id in diff_ids, system_containers))
+    for container in diff:
+        register_container(hub_address, host_uuid, container)
+        print(f"Registered container: {container}")
+
 
 def get_containers_from_docker_client() -> list[Container]:
-    containers = client.containers.list()
+    containers = client.containers.list(all=True)
     containers_list = [
         Container(
             id = str(c.id),
@@ -167,6 +176,34 @@ def get_host_uuid(hub_address: str, agent_uuid: str) -> str:
     response = requests.get(agent_host_id_url)
     host_uuid = response.json()["host_uuid"]
     return host_uuid
+
+def get_host_containers(hub_address: str, host_uuid: str) -> list[Container]:
+    pydockmate_url = f"{hub_address}:8000"
+    if not pydockmate_url.startswith("http"):
+        pydockmate_url = f"http://{pydockmate_url}"
+    host_containers_id_url = f"{pydockmate_url}/api/host/{host_uuid}/containers"
+    
+    response = requests.get(host_containers_id_url)
+    json = response.json()
+    containers = parse_containers_json(json)
+    return containers
+
+def parse_containers_json(json: list[dict[str,str]]) -> list[Container]:
+    containers_list = [
+        Container(
+            id = jo["id"],
+            image = jo["image"],
+            command = jo["command"],
+            created = jo["created"],
+            ports = jo["ports"],
+            name = jo["name"]
+        ) 
+        for jo in json 
+    ]
+    return containers_list
+    
+
+
 
 if __name__ == "__main__":
     main()

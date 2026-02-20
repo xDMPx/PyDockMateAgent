@@ -1,7 +1,6 @@
 from pathlib import Path
 import os
 import time
-from docker.models import containers
 import requests
 import socket
 import platform
@@ -26,6 +25,7 @@ class AgentWithHost:
 
 @dataclass
 class Container:
+    uuid: str | None
     id: str
     image: str
     command: str
@@ -114,12 +114,20 @@ def update_containers(hub_address, host_uuid):
     for container in diff:
         register_container(hub_address, host_uuid, container)
         print(f"Registered container: {container}")
-
+    registered_containers = get_host_containers(hub_address, host_uuid)
+    system_containers = get_containers_from_docker_client()
+    diff_ids = set(c.id for c in registered_containers)-set(c.id for c in system_containers)
+    diff = list(filter(lambda c: c.id in diff_ids, registered_containers))
+    for container in diff:
+        if container.uuid != None:
+            delete_host_container(hub_address, host_uuid, container.uuid)
+            print(f"Removed container: {container}")
 
 def get_containers_from_docker_client() -> list[Container]:
     containers = client.containers.list(all=True)
     containers_list = [
         Container(
+            uuid = None,
             id = str(c.id),
             image = (c.image.tags[0] if c.image else ""),
             command = str(c.attrs["Path"]),
@@ -191,6 +199,7 @@ def get_host_containers(hub_address: str, host_uuid: str) -> list[Container]:
 def parse_containers_json(json: list[dict[str,str]]) -> list[Container]:
     containers_list = [
         Container(
+            uuid = jo["uuid"],
             id = jo["id"],
             image = jo["image"],
             command = jo["command"],
@@ -201,9 +210,14 @@ def parse_containers_json(json: list[dict[str,str]]) -> list[Container]:
         for jo in json 
     ]
     return containers_list
-    
 
+def delete_host_container(hub_address: str, host_uuid: str, container_uuid: str):
+    pydockmate_url = f"{hub_address}:8000"
+    if not pydockmate_url.startswith("http"):
+        pydockmate_url = f"http://{pydockmate_url}"
+    destroy_containers_id_url = f"{pydockmate_url}/api/host/{host_uuid}/container/{container_uuid}/destroy"
 
+    requests.delete(destroy_containers_id_url)
 
 if __name__ == "__main__":
     main()

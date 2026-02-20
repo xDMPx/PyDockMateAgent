@@ -81,7 +81,7 @@ def main():
         agent_uuid = register_agent(hub_address)
         save_agent_id_to_config(agent_uuid)
         host_uuid = get_host_uuid(hub_address, agent_uuid)
-        update_containers(hub_address, host_uuid)
+        register_docker_containers(hub_address, host_uuid)
     host_uuid = get_host_uuid(hub_address, agent_uuid)
     print(host_uuid)
     while True:
@@ -101,19 +101,26 @@ def update_heartbeat(hub_address: str, uuid: str):
     response = requests.put(heartbeat_url)
     print(response.text)
 
-def update_containers(hub_address: str, host_uuid: str):
-    containers = client.containers.list()
+def register_docker_containers(hub_address: str, host_uuid: str):
+    containers = get_containers_from_docker_client()
     for container in containers:
-        id = str(container.id)
-        image = ""
-        if container.image != None:
-            image = container.image.tags[0]
-        command = str(container.attrs["Path"])
-        created = str(container.attrs["Created"])
-        ports = str(container.ports)
-        name = str(container.name)
-        container = Container(id,image,command,created,ports,name)
         register_container(hub_address, host_uuid, container)
+    
+
+def get_containers_from_docker_client() -> list[Container]:
+    containers = client.containers.list()
+    containers_list = [
+        Container(
+            id = str(c.id),
+            image = (c.image.tags[0] if c.image else ""),
+            command = str(c.attrs["Path"]),
+            created = str(c.attrs["Created"]),
+            ports = str(c.ports),
+            name = str(c.name)
+        )
+        for c in containers
+    ]
+    return containers_list
     
 def register_container(hub_address: str, host_uuid: str, container: Container):
     pydockmate_url = f"{hub_address}:8000"

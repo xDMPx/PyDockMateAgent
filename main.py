@@ -1,3 +1,4 @@
+from datetime import date
 from pathlib import Path
 import os
 import time
@@ -8,6 +9,27 @@ import json
 import docker
 import sys
 from dataclasses import dataclass
+
+import asyncio
+from rstream import Producer
+
+# 5GB
+STREAM_RETENTION = 5000000000
+
+
+async def send(stream_name: str, message: str):
+    async with Producer(
+        host="localhost",
+        username="admin",
+        password="password",
+    ) as producer:
+        await producer.create_stream(
+            stream_name, exists_ok=True, arguments={"max-length-bytes": STREAM_RETENTION}
+        )
+
+        await producer.send(stream=stream_name, message=message.encode())
+        print(f"[x] {message} sent")
+
 
 client = docker.from_env()
 agent_version = "0.0.1-dev"
@@ -32,6 +54,12 @@ class Container:
     created: str
     ports: str
     name: str
+
+@dataclass
+class ContainerStat:
+    container_uuid: str
+    status: str
+    timestamp: str
 
 def agent_with_host_to_json(agent_with_host: AgentWithHost):
     agent_with_host_dict = agent_with_host.__dict__
@@ -122,6 +150,18 @@ def update_containers(hub_address, host_uuid):
         if container.uuid != None:
             delete_host_container(hub_address, host_uuid, container.uuid)
             print(f"Removed container: {container}")
+    containers_to_update = get_host_containers(hub_address, host_uuid)
+    for container in containers_to_update:
+        c = client.containers.get(container.id) 
+        if container.uuid == None:
+            continue
+        cs = ContainerStat(
+            container_uuid = container.uuid,
+            status = c.status,
+             timestamp = str(time.time()),
+        )
+        with asyncio.Runner() as runner:
+            runner.run(send(host_uuid, json.dumps(cs.__dict__)))
 
 def get_containers_from_docker_client() -> list[Container]:
     containers = client.containers.list(all=True)

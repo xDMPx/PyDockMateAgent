@@ -16,11 +16,11 @@ from rstream import Producer
 STREAM_RETENTION = 5000000000
 
 
-async def send(stream_name: str, message: str):
+async def send(host: str, username, password, stream_name: str, message: str):
     async with Producer(
-            host="localhost",
-            username="admin",
-            password="password",
+            host=host,
+            username=username,
+            password=password
     ) as producer:
         await producer.create_stream(
             stream_name, exists_ok=True, arguments={"max-length-bytes": STREAM_RETENTION}
@@ -113,6 +113,12 @@ def main():
         sys.exit(1)
     hub_address = sys.argv.pop()
     # TODO: validate
+    rabbitmq_username = os.getenv("RABBITMQ_USERNAME")
+    rabbitmq_password = os.getenv("RABBITMQ_PASSWORD")
+    if rabbitmq_username is None:
+        rabbitmq_username = "admin"
+    if rabbitmq_password is None:
+        rabbitmq_password = "password"
     agent_uuid = load_agent_id_from_config()
     if agent_uuid is None:
         agent_uuid = register_agent(hub_address)
@@ -122,12 +128,12 @@ def main():
     host_uuid = get_host_uuid(hub_address, agent_uuid)
     print(host_uuid)
     while True:
-        update(hub_address, agent_uuid, host_uuid)
+        update(hub_address, rabbitmq_username, rabbitmq_password, agent_uuid, host_uuid)
 
 
-def update(hub_address: str, agent_uuid: str, host_uuid: str):
+def update(hub_address: str, rabbitmq_username: str, rabbitmq_password: str, agent_uuid: str, host_uuid: str):
     update_heartbeat(hub_address, agent_uuid)
-    update_containers(hub_address, host_uuid)
+    update_containers(hub_address, rabbitmq_username, rabbitmq_password, host_uuid)
     time.sleep(60)
 
 
@@ -146,7 +152,7 @@ def register_docker_containers(hub_address: str, host_uuid: str):
         register_container(hub_address, host_uuid, container)
 
 
-def update_containers(hub_address, host_uuid):
+def update_containers(hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
     registered_containers = get_host_containers(hub_address, host_uuid)
     system_containers = get_containers_from_docker_client()
     diff_ids = set(c.id for c in system_containers) - set(c.id for c in registered_containers)
@@ -159,13 +165,13 @@ def update_containers(hub_address, host_uuid):
     diff_ids = set(c.id for c in registered_containers) - set(c.id for c in system_containers)
     diff = list(filter(lambda c: c.id in diff_ids, registered_containers))
     for container in diff:
-        if container.uuid is not None:
+        if container.uuid != None:
             delete_host_container(hub_address, host_uuid, container.uuid)
             print(f"Removed container: {container}")
     containers_to_update = get_host_containers(hub_address, host_uuid)
     for container in containers_to_update:
         c = client.containers.get(container.id)
-        if container.uuid is None:
+        if container.uuid == None:
             continue
         cs = ContainerStat(
             container_uuid=container.uuid,
@@ -173,7 +179,7 @@ def update_containers(hub_address, host_uuid):
             timestamp=str(time.time()),
         )
         with asyncio.Runner() as runner:
-            runner.run(send(host_uuid, json.dumps(cs.__dict__)))
+            runner.run(send(hub_address, rabbitmq_username, rabbitmq_password, host_uuid, json.dumps(cs.__dict__)))
 
 
 def get_containers_from_docker_client() -> list[Container]:

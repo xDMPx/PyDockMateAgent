@@ -62,6 +62,7 @@ class Container:
 class ContainerStat:
     container_uuid: str
     status: str
+    cpu: str
     timestamp: str
 
 
@@ -176,9 +177,20 @@ def update_container_stats(container: Container, hub_address: str, rabbitmq_user
     c = client.containers.get(container.id)
     if container.uuid == None:
         return
+    stats = c.stats(stream=False)
+    if not isinstance(stats, dict):
+        return
+
+    # https://stackoverflow.com/a/77924494
+    cpu_usage = (stats["cpu_stats"]["cpu_usage"]["total_usage"] - stats["precpu_stats"]["cpu_usage"]["total_usage"])
+    cpu_system = (stats["cpu_stats"]["system_cpu_usage"] - stats["precpu_stats"]["system_cpu_usage"])
+    num_cpus = stats["cpu_stats"]["online_cpus"]
+    cpu_perc = round((cpu_usage / cpu_system) * num_cpus * 100, 2)
+
     cs = ContainerStat(
         container_uuid=container.uuid,
         status=c.status,
+        cpu=cpu_perc,
         timestamp=str(time.time()),
     )
     with asyncio.Runner() as runner:

@@ -170,16 +170,20 @@ def update_containers(hub_address: str, rabbitmq_username: str, rabbitmq_passwor
             print(f"Removed container: {container}")
     containers_to_update = get_host_containers(hub_address, host_uuid)
     for container in containers_to_update:
-        c = client.containers.get(container.id)
-        if container.uuid == None:
-            continue
-        cs = ContainerStat(
-            container_uuid=container.uuid,
-            status=c.status,
-            timestamp=str(time.time()),
-        )
-        with asyncio.Runner() as runner:
-            runner.run(send(hub_address, rabbitmq_username, rabbitmq_password, host_uuid, json.dumps(cs.__dict__)))
+        update_container_stats(container, hub_address, rabbitmq_username, rabbitmq_password, host_uuid)
+        
+def update_container_stats(container: Container, hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
+    c = client.containers.get(container.id)
+    if container.uuid == None:
+        return
+    cs = ContainerStat(
+        container_uuid=container.uuid,
+        status=c.status,
+        timestamp=str(time.time()),
+    )
+    with asyncio.Runner() as runner:
+        runner.run(send(hub_address, rabbitmq_username, rabbitmq_password, host_uuid, json.dumps(cs.__dict__)))
+
 
 
 def get_containers_from_docker_client() -> list[Container]:

@@ -175,14 +175,21 @@ def update_containers(hub_address: str, rabbitmq_username: str, rabbitmq_passwor
             delete_host_container(hub_address, host_uuid, container.uuid)
             print(f"Removed container: {container}")
     containers_to_update = get_host_containers(hub_address, host_uuid)
-    for container in containers_to_update:
-        update_container_stats(container, hub_address, rabbitmq_username, rabbitmq_password, host_uuid)
-        
-def update_container_stats(container: Container, hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
-    c = client.containers.get(container.id)
+    with asyncio.Runner() as runner:
+        runner.run(update_containers_stats(containers_to_update, hub_address, rabbitmq_username, rabbitmq_password, host_uuid))
+
+async def update_containers_stats(containers_to_update: list[Container], hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
+    update_tasks = [
+        asyncio.create_task(update_container_stats(container, hub_address, rabbitmq_username, rabbitmq_password, host_uuid))
+        for container in containers_to_update
+    ]
+    await asyncio.gather(*update_tasks)
+
+async def update_container_stats(container: Container, hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
+    c = await asyncio.to_thread(client.containers.get, container.id)
     if container.uuid == None:
         return
-    stats = c.stats(stream=False)
+    stats = await asyncio.to_thread(c.stats, stream=False)
     if not isinstance(stats, dict):
         return
 
@@ -198,10 +205,7 @@ def update_container_stats(container: Container, hub_address: str, rabbitmq_user
         cpu=cpu_perc,
         timestamp=str(time.time()),
     )
-    with asyncio.Runner() as runner:
-        runner.run(send(hub_address, rabbitmq_username, rabbitmq_password, host_uuid, json.dumps(cs.__dict__)))
-
-
+    await send(hub_address, rabbitmq_username, rabbitmq_password, host_uuid, json.dumps(cs.__dict__))
 
 def get_containers_from_docker_client() -> list[Container]:
     containers = client.containers.list(all=True)

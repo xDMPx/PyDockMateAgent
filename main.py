@@ -120,6 +120,11 @@ def main():
         rabbitmq_username = "admin"
     if rabbitmq_password is None:
         rabbitmq_password = "password"
+
+    if not ping(hub_address):
+        print(f"Could not reach PyDockMate Hub at {hub_address}", file=sys.stderr)
+        sys.exit(1)
+
     agent_uuid = load_agent_id_from_config()
     if agent_uuid is None:
         agent_uuid = register_agent(hub_address)
@@ -298,6 +303,12 @@ def delete_host_container(hub_address: str, host_uuid: str, container_uuid: str)
 
     requests.delete(destroy_containers_id_url)
 
+def ping(hub_address: str):
+    pydockmate_url = f"{hub_address}:8000"
+    if not pydockmate_url.startswith("http"):
+        pydockmate_url = f"http://{pydockmate_url}"
+    ping_url = f"{pydockmate_url}/api/ping"
+    return requests.get(ping_url).ok
 
 if __name__ == "__main__":
     main()

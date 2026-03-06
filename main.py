@@ -63,6 +63,7 @@ class ContainerStat:
     container_uuid: str
     status: str
     cpu: str
+    memory: str
     timestamp: str
 
 
@@ -198,11 +199,15 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
     cpu_system = (stats["cpu_stats"]["system_cpu_usage"] - stats["precpu_stats"]["system_cpu_usage"])
     num_cpus = stats["cpu_stats"]["online_cpus"]
     cpu_perc = round((cpu_usage / cpu_system) * num_cpus * 100, 2)
+    mem_bytes_used = stats["memory_stats"]["usage"]
+    mem_bytes_avail = stats["memory_stats"]["limit"]
+    memory_prec = round(mem_bytes_used/mem_bytes_avail*100, 2)
 
     cs = ContainerStat(
         container_uuid=container.uuid,
         status=c.status,
         cpu=cpu_perc,
+        memory=memory_prec,
         timestamp=str(time.time()),
     )
     await send(hub_address, rabbitmq_username, rabbitmq_password, host_uuid, json.dumps(cs.__dict__))

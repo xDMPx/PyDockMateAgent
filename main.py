@@ -135,16 +135,18 @@ def main():
     host_uuid = get_host_uuid(hub_address, agent_uuid)
     print(host_uuid)
     while True:
-        update(hub_address, rabbitmq_username, rabbitmq_password, agent_uuid, host_uuid)
+        with asyncio.Runner() as runner:
+            runner.run(update(hub_address, rabbitmq_username, rabbitmq_password, agent_uuid, host_uuid))
 
 
-def update(hub_address: str, rabbitmq_username: str, rabbitmq_password: str, agent_uuid: str, host_uuid: str):
-    update_heartbeat(hub_address, agent_uuid)
-    update_containers(hub_address, rabbitmq_username, rabbitmq_password, host_uuid)
-    time.sleep(60)
+async def update(hub_address: str, rabbitmq_username: str, rabbitmq_password: str, agent_uuid: str, host_uuid: str):
+    update_tasks = [update_heartbeat(hub_address, agent_uuid),
+                    update_containers(hub_address, rabbitmq_username, rabbitmq_password, host_uuid),
+                    asyncio.sleep(60)]
+    await asyncio.gather(*update_tasks)
 
 
-def update_heartbeat(hub_address: str, uuid: str):
+async def update_heartbeat(hub_address: str, uuid: str):
     pydockmate_url = f"{hub_address}:8000"
     if not pydockmate_url.startswith("http"):
         pydockmate_url = f"http://{pydockmate_url}"
@@ -159,7 +161,7 @@ def register_docker_containers(hub_address: str, host_uuid: str):
         register_container(hub_address, host_uuid, container)
 
 
-def update_containers(hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
+async def update_containers(hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
     registered_containers = get_host_containers(hub_address, host_uuid)
     system_containers = get_containers_from_docker_client()
     diff_ids = set(c.id for c in system_containers) - set(c.id for c in registered_containers)
@@ -176,8 +178,7 @@ def update_containers(hub_address: str, rabbitmq_username: str, rabbitmq_passwor
             delete_host_container(hub_address, host_uuid, container.uuid)
             print(f"Removed container: {container}")
     containers_to_update = get_host_containers(hub_address, host_uuid)
-    with asyncio.Runner() as runner:
-        runner.run(update_containers_stats(containers_to_update, hub_address, rabbitmq_username, rabbitmq_password, host_uuid))
+    await update_containers_stats(containers_to_update, hub_address, rabbitmq_username, rabbitmq_password, host_uuid)
 
 async def update_containers_stats(containers_to_update: list[Container], hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
     update_tasks = [

@@ -122,17 +122,26 @@ def main():
     if rabbitmq_password is None:
         rabbitmq_password = "password"
 
-    if not ping(hub_address):
+    ping_ok = False
+    with asyncio.Runner() as runner:
+        ping_ok = runner.run(ping(hub_address))
+    if not ping_ok:
         print(f"Could not reach PyDockMate Hub at {hub_address}", file=sys.stderr)
         sys.exit(1)
 
     agent_uuid = load_agent_id_from_config()
     if agent_uuid is None:
-        agent_uuid = register_agent(hub_address)
+        agent_uuid = ""
+        with asyncio.Runner() as runner:
+             agent_uuid = runner.run(register_agent(hub_address))
         save_agent_id_to_config(agent_uuid)
-        host_uuid = get_host_uuid(hub_address, agent_uuid)
+        host_uuid =  ""
+        with asyncio.Runner() as runner:
+            host_uuid = runner.run(get_host_uuid(hub_address, agent_uuid))
         register_docker_containers(hub_address, host_uuid)
-    host_uuid = get_host_uuid(hub_address, agent_uuid)
+    host_uuid = ""
+    with asyncio.Runner() as runner:
+        host_uuid = runner.run(get_host_uuid(hub_address, agent_uuid))
     print(host_uuid)
     while True:
         with asyncio.Runner() as runner:
@@ -158,27 +167,29 @@ async def update_heartbeat(hub_address: str, uuid: str):
 def register_docker_containers(hub_address: str, host_uuid: str):
     containers = get_containers_from_docker_client()
     for container in containers:
-        register_container(hub_address, host_uuid, container)
+        with asyncio.Runner() as runner:
+            runner.run(register_container(hub_address, host_uuid, container))
 
 
 async def update_containers(hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
-    registered_containers = get_host_containers(hub_address, host_uuid)
+    registered_containers = await get_host_containers(hub_address, host_uuid)
     system_containers = get_containers_from_docker_client()
     diff_ids = set(c.id for c in system_containers) - set(c.id for c in registered_containers)
     diff = list(filter(lambda c: c.id in diff_ids, system_containers))
     for container in diff:
-        register_container(hub_address, host_uuid, container)
+        await register_container(hub_address, host_uuid, container)
         print(f"Registered container: {container}")
-    registered_containers = get_host_containers(hub_address, host_uuid)
+    registered_containers = await get_host_containers(hub_address, host_uuid)
     system_containers = get_containers_from_docker_client()
     diff_ids = set(c.id for c in registered_containers) - set(c.id for c in system_containers)
     diff = list(filter(lambda c: c.id in diff_ids, registered_containers))
     for container in diff:
         if container.uuid != None:
-            delete_host_container(hub_address, host_uuid, container.uuid)
+            await delete_host_container(hub_address, host_uuid, container.uuid)
             print(f"Removed container: {container}")
-    containers_to_update = get_host_containers(hub_address, host_uuid)
+    containers_to_update = await get_host_containers(hub_address, host_uuid)
     await update_containers_stats(containers_to_update, hub_address, rabbitmq_username, rabbitmq_password, host_uuid)
+
 
 async def update_containers_stats(containers_to_update: list[Container], hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
     update_tasks = [
@@ -186,6 +197,7 @@ async def update_containers_stats(containers_to_update: list[Container], hub_add
         for container in containers_to_update
     ]
     await asyncio.gather(*update_tasks)
+
 
 async def update_container_stats(container: Container, hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
     c = await asyncio.to_thread(client.containers.get, container.id)
@@ -195,6 +207,7 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
     if not isinstance(stats, dict):
         return
 
+    print(stats)
     # https://stackoverflow.com/a/77924494
     cpu_usage = (stats["cpu_stats"]["cpu_usage"]["total_usage"] - stats["precpu_stats"]["cpu_usage"]["total_usage"])
     cpu_system = (stats["cpu_stats"]["system_cpu_usage"] - stats["precpu_stats"]["system_cpu_usage"])
@@ -213,6 +226,7 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
     )
     await send(hub_address, rabbitmq_username, rabbitmq_password, host_uuid, json.dumps(cs.__dict__))
 
+
 def get_containers_from_docker_client() -> list[Container]:
     containers = client.containers.list(all=True)
     containers_list = [
@@ -230,7 +244,7 @@ def get_containers_from_docker_client() -> list[Container]:
     return containers_list
 
 
-def register_container(hub_address: str, host_uuid: str, container: Container):
+async def register_container(hub_address: str, host_uuid: str, container: Container):
     pydockmate_url = f"{hub_address}:8000"
     if not pydockmate_url.startswith("http"):
         pydockmate_url = f"http://{pydockmate_url}"
@@ -239,10 +253,10 @@ def register_container(hub_address: str, host_uuid: str, container: Container):
     headers = {
         "Content-Type": "application/json"
     }
-    requests.post(register_url, data=json.dumps(container.__dict__), headers=headers)
+    await asyncio.to_thread(requests.post, register_url, data=json.dumps(container.__dict__), headers=headers)
 
 
-def register_agent(hub_address: str) -> str:
+async def register_agent(hub_address: str) -> str:
     pydockmate_url = f"{hub_address}:8000"
     if not pydockmate_url.startswith("http"):
         pydockmate_url = f"http://{pydockmate_url}"
@@ -260,30 +274,30 @@ def register_agent(hub_address: str) -> str:
         "Content-Type": "application/json"
     }
 
-    response = requests.post(register_url, data=agent_with_host_json, headers=headers)
+    response = await asyncio.to_thread(requests.post, register_url, data=agent_with_host_json, headers=headers)
     uuid: str = response.json()["uuid"]
     print(uuid)
     return uuid
 
 
-def get_host_uuid(hub_address: str, agent_uuid: str) -> str:
+async def get_host_uuid(hub_address: str, agent_uuid: str) -> str:
     pydockmate_url = f"{hub_address}:8000"
     if not pydockmate_url.startswith("http"):
         pydockmate_url = f"http://{pydockmate_url}"
     agent_host_id_url = f"{pydockmate_url}/api/agent/{agent_uuid}/host"
 
-    response = requests.get(agent_host_id_url)
+    response = await asyncio.to_thread(requests.get, agent_host_id_url)
     host_uuid = response.json()["host_uuid"]
     return host_uuid
 
 
-def get_host_containers(hub_address: str, host_uuid: str) -> list[Container]:
+async def get_host_containers(hub_address: str, host_uuid: str) -> list[Container]:
     pydockmate_url = f"{hub_address}:8000"
     if not pydockmate_url.startswith("http"):
         pydockmate_url = f"http://{pydockmate_url}"
     host_containers_id_url = f"{pydockmate_url}/api/host/{host_uuid}/containers"
 
-    response = requests.get(host_containers_id_url)
+    response = await asyncio.to_thread(requests.get, host_containers_id_url)
     json = response.json()
     containers = parse_containers_json(json)
     return containers
@@ -305,20 +319,21 @@ def parse_containers_json(json: list[dict[str, str]]) -> list[Container]:
     return containers_list
 
 
-def delete_host_container(hub_address: str, host_uuid: str, container_uuid: str):
+async def delete_host_container(hub_address: str, host_uuid: str, container_uuid: str):
     pydockmate_url = f"{hub_address}:8000"
     if not pydockmate_url.startswith("http"):
         pydockmate_url = f"http://{pydockmate_url}"
     destroy_containers_id_url = f"{pydockmate_url}/api/host/{host_uuid}/container/{container_uuid}/destroy"
 
-    requests.delete(destroy_containers_id_url)
+    await asyncio.to_thread(requests.delete, destroy_containers_id_url)
 
-def ping(hub_address: str):
+
+async def ping(hub_address: str):
     pydockmate_url = f"{hub_address}:8000"
     if not pydockmate_url.startswith("http"):
         pydockmate_url = f"http://{pydockmate_url}"
     ping_url = f"{pydockmate_url}/api/ping"
-    return requests.get(ping_url).ok
+    return (await asyncio.to_thread(requests.get, ping_url)).ok
 
 if __name__ == "__main__":
     main()

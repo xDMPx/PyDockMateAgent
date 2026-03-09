@@ -133,26 +133,37 @@ async def update_heartbeat(hub_address: str, uuid: str):
 
 async def register_docker_containers(hub_address: str, host_uuid: str):
     containers = await get_containers_from_docker_client()
-    for container in containers:
-            await register_container(hub_address, host_uuid, container)
+    register_container_tasks = [
+        asyncio.create_task(register_container(hub_address, host_uuid, container))
+        for container in containers
+    ]
+    await asyncio.gather(*register_container_tasks)
 
+
+async def _register_container(hub_address: str, host_uuid: str, container: Container):
+    await register_container(hub_address, host_uuid, container)
+    print(f"Registered container: {container}")
+
+async def _delete_host_container(hub_address: str, host_uuid: str, container: Container):
+    if container.uuid != None:
+        await delete_host_container(hub_address, host_uuid, container.uuid)
+        print(f"Removed container: {container}")
 
 async def update_containers(hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
     registered_containers = await get_host_containers(hub_address, host_uuid)
     system_containers = await get_containers_from_docker_client()
     diff_ids = set(c.id for c in system_containers) - set(c.id for c in registered_containers)
-    diff = list(filter(lambda c: c.id in diff_ids, system_containers))
-    for container in diff:
-        await register_container(hub_address, host_uuid, container)
-        print(f"Registered container: {container}")
+    diff = list(filter(lambda c: c.id in diff_ids, system_containers)) 
+    
+    asyncio.gather(*[asyncio.create_task(_register_container(hub_address, host_uuid, container)) for container in diff])
+
     registered_containers = await get_host_containers(hub_address, host_uuid)
     system_containers = await get_containers_from_docker_client()
     diff_ids = set(c.id for c in registered_containers) - set(c.id for c in system_containers)
     diff = list(filter(lambda c: c.id in diff_ids, registered_containers))
-    for container in diff:
-        if container.uuid != None:
-            await delete_host_container(hub_address, host_uuid, container.uuid)
-            print(f"Removed container: {container}")
+
+    asyncio.gather(*[asyncio.create_task(_delete_host_container(hub_address,host_uuid,container)) for container in diff])
+
     containers_to_update = await get_host_containers(hub_address, host_uuid)
     await update_containers_stats(containers_to_update, hub_address, rabbitmq_username, rabbitmq_password, host_uuid)
 

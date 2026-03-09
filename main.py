@@ -7,7 +7,7 @@ import platform
 import json
 import docker
 import sys
-from dataclasses import dataclass
+from .dataclasses import AgentWithHost, Container, ContainerStat, Host
 
 import asyncio
 from rstream import Producer
@@ -32,40 +32,6 @@ async def send(host: str, username, password, stream_name: str, message: str):
 
 client = docker.from_env()
 agent_version = "0.0.1-dev"
-
-
-@dataclass
-class Host:
-    hostname: str
-    os: str
-    docker_version: str
-
-
-@dataclass
-class AgentWithHost:
-    version: str
-    host: Host
-
-
-@dataclass
-class Container:
-    uuid: str | None
-    id: str
-    image: str
-    command: str
-    created: str
-    ports: str
-    name: str
-
-
-@dataclass
-class ContainerStat:
-    container_uuid: str
-    status: str
-    cpu: str | None
-    memory: str | None
-    timestamp: str
-
 
 def agent_with_host_to_json(agent_with_host: AgentWithHost):
     agent_with_host_dict = agent_with_host.__dict__

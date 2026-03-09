@@ -74,7 +74,7 @@ def save_agent_id_to_config(url: str) -> None:
         raise RuntimeError(f"Failed to write config: {e}") from e
 
 
-def main():
+async def main():
     hub_address = ""
     if len(sys.argv) != 2:
         print("Provided ip or domain", file=sys.stderr)
@@ -88,31 +88,21 @@ def main():
     if rabbitmq_password is None:
         rabbitmq_password = "password"
 
-    ping_ok = False
-    with asyncio.Runner() as runner:
-        ping_ok = runner.run(ping(hub_address))
+    ping_ok = await ping(hub_address)
     if not ping_ok:
         print(f"Could not reach PyDockMate Hub at {hub_address}", file=sys.stderr)
         sys.exit(1)
 
     agent_uuid = load_agent_id_from_config()
     if agent_uuid is None:
-        agent_uuid = ""
-        with asyncio.Runner() as runner:
-             agent_uuid = runner.run(register_agent(hub_address))
+        agent_uuid = await register_agent(hub_address)
         save_agent_id_to_config(agent_uuid)
-        host_uuid =  ""
-        with asyncio.Runner() as runner:
-            host_uuid = runner.run(get_host_uuid(hub_address, agent_uuid))
-        with asyncio.Runner() as runner:
-            runner.run(register_docker_containers(hub_address, host_uuid))
-    host_uuid = ""
-    with asyncio.Runner() as runner:
-        host_uuid = runner.run(get_host_uuid(hub_address, agent_uuid))
+        host_uuid = await get_host_uuid(hub_address, agent_uuid)
+        await register_docker_containers(hub_address, host_uuid)
+    host_uuid = await get_host_uuid(hub_address, agent_uuid)
     print(host_uuid)
     while True:
-        with asyncio.Runner() as runner:
-            runner.run(update(hub_address, rabbitmq_username, rabbitmq_password, agent_uuid, host_uuid))
+        await update(hub_address, rabbitmq_username, rabbitmq_password, agent_uuid, host_uuid)
 
 
 async def update(hub_address: str, rabbitmq_username: str, rabbitmq_password: str, agent_uuid: str, host_uuid: str):
@@ -320,4 +310,4 @@ async def ping(hub_address: str):
     return (await asyncio.to_thread(requests.get, ping_url)).ok
 
 if __name__ == "__main__":
-    main()
+    asyncio.run(main())

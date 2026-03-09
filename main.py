@@ -7,7 +7,7 @@ import platform
 import json
 import docker
 import sys
-from .dataclasses import AgentWithHost, Container, ContainerStat, Host
+from pydockmate_dataclasses import AgentWithHost, Container, ContainerStat, Host
 
 import asyncio
 from rstream import Producer
@@ -173,7 +173,7 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
     stats = await asyncio.to_thread(c.stats, stream=False)
     if not isinstance(stats, dict):
         return
-
+    print(stats)
     cpu_perc = None
     memory_prec = None
     # https://stackoverflow.com/a/77924494

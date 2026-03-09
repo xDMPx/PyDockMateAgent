@@ -62,8 +62,8 @@ class Container:
 class ContainerStat:
     container_uuid: str
     status: str
-    cpu: str
-    memory: str
+    cpu: str | None
+    memory: str | None
     timestamp: str
 
 
@@ -207,15 +207,20 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
     if not isinstance(stats, dict):
         return
 
-    print(stats)
+    cpu_perc = None
+    memory_prec = None
     # https://stackoverflow.com/a/77924494
-    cpu_usage = (stats["cpu_stats"]["cpu_usage"]["total_usage"] - stats["precpu_stats"]["cpu_usage"]["total_usage"])
-    cpu_system = (stats["cpu_stats"]["system_cpu_usage"] - stats["precpu_stats"]["system_cpu_usage"])
-    num_cpus = stats["cpu_stats"]["online_cpus"]
-    cpu_perc = round((cpu_usage / cpu_system) * num_cpus * 100, 2)
-    mem_bytes_used = stats["memory_stats"]["usage"]
-    mem_bytes_avail = stats["memory_stats"]["limit"]
-    memory_prec = round(mem_bytes_used/mem_bytes_avail*100, 2)
+    try:
+        cpu_usage = (stats["cpu_stats"]["cpu_usage"]["total_usage"] - stats["precpu_stats"]["cpu_usage"]["total_usage"])
+        cpu_system = (stats["cpu_stats"]["system_cpu_usage"] - stats["precpu_stats"]["system_cpu_usage"])
+        num_cpus = stats["cpu_stats"]["online_cpus"]
+        cpu_perc = round((cpu_usage / cpu_system) * num_cpus * 100, 2)
+    except: pass
+    try: 
+        mem_bytes_used = stats["memory_stats"]["usage"]
+        mem_bytes_avail = stats["memory_stats"]["limit"]
+        memory_prec = round(mem_bytes_used/mem_bytes_avail*100, 2)
+    except: pass
 
     cs = ContainerStat(
         container_uuid=container.uuid,

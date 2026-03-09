@@ -104,7 +104,8 @@ def main():
         host_uuid =  ""
         with asyncio.Runner() as runner:
             host_uuid = runner.run(get_host_uuid(hub_address, agent_uuid))
-        register_docker_containers(hub_address, host_uuid)
+        with asyncio.Runner() as runner:
+            runner.run(register_docker_containers(hub_address, host_uuid))
     host_uuid = ""
     with asyncio.Runner() as runner:
         host_uuid = runner.run(get_host_uuid(hub_address, agent_uuid))
@@ -126,27 +127,26 @@ async def update_heartbeat(hub_address: str, uuid: str):
     if not pydockmate_url.startswith("http"):
         pydockmate_url = f"http://{pydockmate_url}"
     heartbeat_url = f"{pydockmate_url}/api/agent/{uuid}/heartbeat/"
-    response = requests.put(heartbeat_url)
+    response = await asyncio.to_thread(requests.put, heartbeat_url)
     print(response.text)
 
 
-def register_docker_containers(hub_address: str, host_uuid: str):
-    containers = get_containers_from_docker_client()
+async def register_docker_containers(hub_address: str, host_uuid: str):
+    containers = await get_containers_from_docker_client()
     for container in containers:
-        with asyncio.Runner() as runner:
-            runner.run(register_container(hub_address, host_uuid, container))
+            await register_container(hub_address, host_uuid, container)
 
 
 async def update_containers(hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
     registered_containers = await get_host_containers(hub_address, host_uuid)
-    system_containers = get_containers_from_docker_client()
+    system_containers = await get_containers_from_docker_client()
     diff_ids = set(c.id for c in system_containers) - set(c.id for c in registered_containers)
     diff = list(filter(lambda c: c.id in diff_ids, system_containers))
     for container in diff:
         await register_container(hub_address, host_uuid, container)
         print(f"Registered container: {container}")
     registered_containers = await get_host_containers(hub_address, host_uuid)
-    system_containers = get_containers_from_docker_client()
+    system_containers = await get_containers_from_docker_client()
     diff_ids = set(c.id for c in registered_containers) - set(c.id for c in system_containers)
     diff = list(filter(lambda c: c.id in diff_ids, registered_containers))
     for container in diff:
@@ -198,8 +198,8 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
     await send(hub_address, rabbitmq_username, rabbitmq_password, host_uuid, json.dumps(cs.__dict__))
 
 
-def get_containers_from_docker_client() -> list[Container]:
-    containers = client.containers.list(all=True)
+async def get_containers_from_docker_client() -> list[Container]:
+    containers = await asyncio.to_thread(client.containers.list, all=True)
     containers_list = [
         Container(
             uuid=None,
@@ -233,9 +233,11 @@ async def register_agent(hub_address: str) -> str:
         pydockmate_url = f"http://{pydockmate_url}"
     register_url = f"{pydockmate_url}/api/agent/register"
 
-    hostname = socket.gethostname()
-    os = platform.system() + " " + platform.release()
-    docker_version = client.version()["Version"]
+    hostname = await asyncio.to_thread(socket.gethostname)
+    system = await asyncio.to_thread(platform.system)
+    release = await asyncio.to_thread(platform.release)
+    os = system + " " + release
+    docker_version = (await asyncio.to_thread(client.version))["Version"]
     host = Host(hostname, os, docker_version)
     agent_with_host = AgentWithHost(agent_version, host)
     agent_with_host_json = agent_with_host_to_json(agent_with_host)

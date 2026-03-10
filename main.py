@@ -173,9 +173,10 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
     stats = await asyncio.to_thread(c.stats, stream=False)
     if not isinstance(stats, dict):
         return
-    print(stats)
+
     cpu_perc = None
     memory_prec = None
+    network_rx_bytes = None
     # https://stackoverflow.com/a/77924494
     try:
         cpu_usage = (stats["cpu_stats"]["cpu_usage"]["total_usage"] - stats["precpu_stats"]["cpu_usage"]["total_usage"])
@@ -188,12 +189,19 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
         mem_bytes_avail = stats["memory_stats"]["limit"]
         memory_prec = round(mem_bytes_used/mem_bytes_avail*100, 2)
     except: pass
+    try:
+        rx_bytes = 0
+        for interface in stats["networks"]:
+            rx_bytes += int(stats["networks"][interface]["rx_bytes"])
+        network_rx_bytes = str(rx_bytes)
+    except: pass
 
     cs = ContainerStat(
         container_uuid=container.uuid,
         status=c.status,
         cpu=cpu_perc,
         memory=memory_prec,
+        network_rx_bytes=network_rx_bytes,
         timestamp=str(time.time()),
     )
     await send(hub_address, rabbitmq_username, rabbitmq_password, host_uuid, json.dumps(cs.__dict__))

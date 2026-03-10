@@ -151,9 +151,11 @@ async def update_containers_stats(containers_to_update: list[Container], hub_add
 
 
 async def update_container_stats(container: Container, hub_address: str, rabbitmq_username: str, rabbitmq_password: str, host_uuid: str):
-    c = await asyncio.to_thread(client.containers.get, container.id)
     if container.uuid == None:
         return
+    try:
+        c = await asyncio.to_thread(client.containers.get, container.id)
+    except: return
     stats = await asyncio.to_thread(c.stats, stream=False)
     if not isinstance(stats, dict):
         return

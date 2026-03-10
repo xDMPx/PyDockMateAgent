@@ -163,6 +163,7 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
     cpu_perc = None
     memory_prec = None
     network_rx_bytes = None
+    network_tx_bytes = None
     # https://stackoverflow.com/a/77924494
     try:
         cpu_usage = (stats["cpu_stats"]["cpu_usage"]["total_usage"] - stats["precpu_stats"]["cpu_usage"]["total_usage"])
@@ -177,9 +178,12 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
     except: pass
     try:
         rx_bytes = 0
+        tx_bytes = 0
         for interface in stats["networks"]:
             rx_bytes += int(stats["networks"][interface]["rx_bytes"])
+            tx_bytes += int(stats["networks"][interface]["tx_bytes"])
         network_rx_bytes = str(rx_bytes)
+        network_tx_bytes = str(tx_bytes)
     except: pass
 
     cs = ContainerStat(
@@ -188,6 +192,7 @@ async def update_container_stats(container: Container, hub_address: str, rabbitm
         cpu=cpu_perc,
         memory=memory_prec,
         network_rx_bytes=network_rx_bytes,
+        network_tx_bytes=network_tx_bytes,
         timestamp=str(time.time()),
     )
     await send(hub_address, rabbitmq_username, rabbitmq_password, host_uuid, json.dumps(cs.__dict__))

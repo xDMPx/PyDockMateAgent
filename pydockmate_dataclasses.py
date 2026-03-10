@@ -31,4 +31,5 @@ class ContainerStat:
     cpu: str | None
     memory: str | None
     network_rx_bytes: str | None
+    network_tx_bytes: str | None
     timestamp: str

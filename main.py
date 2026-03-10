@@ -1,13 +1,11 @@
 from pathlib import Path
 import os
 import time
-import requests
-import socket
-import platform
 import json
 import docker
 import sys
-from pydockmate_dataclasses import AgentWithHost, Container, ContainerStat, Host
+from pydockmate_dataclasses import Container, ContainerStat
+from requests_utils import delete_host_container, get_host_containers, get_host_uuid, ping, register_agent, register_container, update_heartbeat
 
 import asyncio
 from rstream import Producer
@@ -32,11 +30,6 @@ async def send(host: str, username, password, stream_name: str, message: str):
 
 client = docker.from_env()
 agent_version = "0.0.1-dev"
-
-def agent_with_host_to_json(agent_with_host: AgentWithHost):
-    agent_with_host_dict = agent_with_host.__dict__
-    agent_with_host_dict["host"] = agent_with_host.host.__dict__
-    return json.dumps(agent_with_host_dict)
 
 
 def config_dir() -> Path:
@@ -95,7 +88,7 @@ async def main():
 
     agent_uuid = load_agent_id_from_config()
     if agent_uuid is None:
-        agent_uuid = await register_agent(hub_address)
+        agent_uuid = await register_agent(client, hub_address, agent_version)
         save_agent_id_to_config(agent_uuid)
         host_uuid = await get_host_uuid(hub_address, agent_uuid)
         await register_docker_containers(hub_address, host_uuid)
@@ -110,15 +103,6 @@ async def update(hub_address: str, rabbitmq_username: str, rabbitmq_password: st
                     update_containers(hub_address, rabbitmq_username, rabbitmq_password, host_uuid),
                     asyncio.sleep(60)]
     await asyncio.gather(*update_tasks)
-
-
-async def update_heartbeat(hub_address: str, uuid: str):
-    pydockmate_url = f"{hub_address}:8000"
-    if not pydockmate_url.startswith("http"):
-        pydockmate_url = f"http://{pydockmate_url}"
-    heartbeat_url = f"{pydockmate_url}/api/agent/{uuid}/heartbeat/"
-    response = await asyncio.to_thread(requests.put, heartbeat_url)
-    print(response.text)
 
 
 async def register_docker_containers(hub_address: str, host_uuid: str):
@@ -223,99 +207,6 @@ async def get_containers_from_docker_client() -> list[Container]:
     ]
     return containers_list
 
-
-async def register_container(hub_address: str, host_uuid: str, container: Container):
-    pydockmate_url = f"{hub_address}:8000"
-    if not pydockmate_url.startswith("http"):
-        pydockmate_url = f"http://{pydockmate_url}"
-    register_url = f"{pydockmate_url}/api/host/{host_uuid}/container/register"
-
-    headers = {
-        "Content-Type": "application/json"
-    }
-    await asyncio.to_thread(requests.post, register_url, data=json.dumps(container.__dict__), headers=headers)
-
-
-async def register_agent(hub_address: str) -> str:
-    pydockmate_url = f"{hub_address}:8000"
-    if not pydockmate_url.startswith("http"):
-        pydockmate_url = f"http://{pydockmate_url}"
-    register_url = f"{pydockmate_url}/api/agent/register"
-
-    hostname = await asyncio.to_thread(socket.gethostname)
-    system = await asyncio.to_thread(platform.system)
-    release = await asyncio.to_thread(platform.release)
-    os = system + " " + release
-    docker_version = (await asyncio.to_thread(client.version))["Version"]
-    host = Host(hostname, os, docker_version)
-    agent_with_host = AgentWithHost(agent_version, host)
-    agent_with_host_json = agent_with_host_to_json(agent_with_host)
-    print(agent_with_host_json)
-
-    headers = {
-        "Content-Type": "application/json"
-    }
-
-    response = await asyncio.to_thread(requests.post, register_url, data=agent_with_host_json, headers=headers)
-    uuid: str = response.json()["uuid"]
-    print(uuid)
-    return uuid
-
-
-async def get_host_uuid(hub_address: str, agent_uuid: str) -> str:
-    pydockmate_url = f"{hub_address}:8000"
-    if not pydockmate_url.startswith("http"):
-        pydockmate_url = f"http://{pydockmate_url}"
-    agent_host_id_url = f"{pydockmate_url}/api/agent/{agent_uuid}/host"
-
-    response = await asyncio.to_thread(requests.get, agent_host_id_url)
-    host_uuid = response.json()["host_uuid"]
-    return host_uuid
-
-
-async def get_host_containers(hub_address: str, host_uuid: str) -> list[Container]:
-    pydockmate_url = f"{hub_address}:8000"
-    if not pydockmate_url.startswith("http"):
-        pydockmate_url = f"http://{pydockmate_url}"
-    host_containers_id_url = f"{pydockmate_url}/api/host/{host_uuid}/containers"
-
-    response = await asyncio.to_thread(requests.get, host_containers_id_url)
-    json = response.json()
-    containers = parse_containers_json(json)
-    return containers
-
-
-def parse_containers_json(json: list[dict[str, str]]) -> list[Container]:
-    containers_list = [
-        Container(
-            uuid=jo["uuid"],
-            id=jo["id"],
-            image=jo["image"],
-            command=jo["command"],
-            created=jo["created"],
-            ports=jo["ports"],
-            name=jo["name"]
-        )
-        for jo in json
-    ]
-    return containers_list
-
-
-async def delete_host_container(hub_address: str, host_uuid: str, container_uuid: str):
-    pydockmate_url = f"{hub_address}:8000"
-    if not pydockmate_url.startswith("http"):
-        pydockmate_url = f"http://{pydockmate_url}"
-    destroy_containers_id_url = f"{pydockmate_url}/api/host/{host_uuid}/container/{container_uuid}/destroy"
-
-    await asyncio.to_thread(requests.delete, destroy_containers_id_url)
-
-
-async def ping(hub_address: str):
-    pydockmate_url = f"{hub_address}:8000"
-    if not pydockmate_url.startswith("http"):
-        pydockmate_url = f"http://{pydockmate_url}"
-    ping_url = f"{pydockmate_url}/api/ping"
-    return (await asyncio.to_thread(requests.get, ping_url)).ok
 
 if __name__ == "__main__":
     asyncio.run(main())
